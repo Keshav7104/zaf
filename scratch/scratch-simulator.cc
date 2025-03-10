@@ -850,6 +850,7 @@ uint32_t App::totalSent = 0;
 uint32_t App::totalReceived = 0;
 uint32_t App::noNegibhours = 0;
 
+
 void
 RunSimulation(uint8_t numDrones, double& pdr)
 {
@@ -898,20 +899,10 @@ RunSimulation(uint8_t numDrones, double& pdr)
 
     // Set up mobility.
     MobilityHelper mobility;
-    // mobility.SetMobilityModel("ns3::GaussMarkovMobilityModel",
-    //                           "Bounds", BoxValue(Box(0, 1000, 0, 1000, 50, 100)),
-    //                           "TimeStep", TimeValue(Seconds(0.5)),
-    //                           "Alpha", DoubleValue(0.85),
-    //                           "MeanVelocity", StringValue("ns3::UniformRandomVariable[Min=8.0|Max=20.0]"),
-    //                           "MeanDirection", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=6.283185307]"),
-    //                           "MeanPitch", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=0.0]"),
-    //                           "NormalVelocity", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=1.0|Bound=2.0]"),
-    //                           "NormalDirection", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=1.0|Bound=2.0]"),
-    //                           "NormalPitch", StringValue("ns3::NormalRandomVariable[Mean=0.0|Variance=1.0|Bound=2.0]"));
 
     mobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
                               "Speed",
-                              StringValue("ns3::UniformRandomVariable[Min=8.0|Max=20.0]"),
+                              StringValue("ns3::UniformRandomVariable[Min=8.0|Max=10.0]"),
                               "Pause",
                               StringValue("ns3::UniformRandomVariable[Min=0.0|Max=2.0]"),
                               "PositionAllocator",
@@ -919,7 +910,7 @@ RunSimulation(uint8_t numDrones, double& pdr)
     mobility.SetPositionAllocator("ns3::RandomBoxPositionAllocator",
                                   "X", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=1000.0]"),
                                   "Y", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=1000.0]"),
-                                  "Z", StringValue("ns3::UniformRandomVariable[Min=50.0|Max=100.0]"));
+                                  "Z", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=50.0]"));
     mobility.Install(nodes);
 
     // Create and install the application on each node.
@@ -939,17 +930,10 @@ RunSimulation(uint8_t numDrones, double& pdr)
     Ptr<Node> destination = nodes.Get(TOTAL_DRONES - 1);
     destPos = destination->GetObject<MobilityModel>()->GetPosition();
     destAddr = interfaces.GetAddress(TOTAL_DRONES - 1);
-    // appNode[0]->SendMessage(destPos,destAddr);
 
-    // for (int i = 1; i <= totalTime; i++)
-    // {
-    //     if (i % 10 == 0) // at every 10s
-    //         Simulator::Schedule(Seconds(i), &handler, i);
-    // }
-
-    for (uint32_t i = 0; i < 1000; ++i)
+    for (uint32_t i = 0; i < 100; ++i)
     {
-        Simulator::Schedule(Seconds(5.0 + i * 1.0),
+        Simulator::Schedule(Seconds(1.0 + i * 0.5),
                             &App::SendMessage,
                             appNode[0],
                             destPos,
@@ -981,7 +965,7 @@ main(int argc, char* argv[])
     double pdr;
     std::vector<double> pdrs;
     std::vector<int> droneCounts;
-    for (int i = 10; i <= 200; i = i + 10)
+    for (int i = 50; i <= 250; i = i + 50)
     {
         RunSimulation(i, pdr);
         pdrs.push_back(pdr);
@@ -1005,9 +989,27 @@ main(int argc, char* argv[])
 
     plot.AddDataset(dataset);
 
-    std::ofstream plotFile("pdr-vs-drones-RWP.plt");
-    plot.GenerateOutput(plotFile);
+    std::ofstream plotFile("pdr-vs-drones.plt");
+    plotFile << "set terminal png\n";
+    plotFile << "set output 'pdr-vs-drones.png'\n";
+    plotFile << "set title 'PDR vs. Number of Drones'\n";
+    plotFile << "set xlabel 'Number of Drones'\n";
+    plotFile << "set ylabel 'PDR (%)'\n";
+    plotFile << "set xrange [0:50]\n";  // Set the x-axis range if needed
+    plotFile << "set yrange [0:100]\n";   // Set the y-axis range from 0 to 100
+    plotFile << "set ytics 10\n";         // Set the y-axis interval to 10
+    plotFile << "plot '-' using 1:2 title 'PDR' with linespoints\n";
+
+    for (size_t i = 0; i < droneCounts.size(); ++i)
+    {
+        plotFile << droneCounts[i] << " " << pdrs[i] << "\n";
+    }
+
+    plotFile << "e\n";
     plotFile.close();
+
+    // Call Gnuplot to generate the graph
+    system("gnuplot pdr-vs-drones.plt");
 
     std::cout << "Simulation completed. Plot saved as pdr-vs-drones.png" << std::endl;
 
