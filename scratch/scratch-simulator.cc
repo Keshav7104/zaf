@@ -10,6 +10,13 @@
 #include <map>
 #include <unordered_set>
 
+#include <vector>
+#include <chrono>
+#include <fstream>
+
+std::map<uint32_t, double> sendTimes;
+std::vector<double> delays;
+
 uint16_t TOTAL_DRONES = 2;
 
 using namespace ns3;
@@ -20,6 +27,7 @@ Vector destPos;
 Ipv4Address destAddr;
 uint16_t srcNode;
 uint32_t packetIdCounter;
+uint8_t forwadingFactor = 1;
 
 enum Zone
 {
@@ -633,6 +641,13 @@ App::HandleMessage(Ptr<Socket> socket)
     {
         NS_LOG_INFO("Wallah!!! Packet Recieved");
         App::totalReceived++;
+        double receiveTime = Simulator::Now().GetSeconds();
+        uint32_t packetId = zafHeader.GetPacketId();
+        if (sendTimes.find(packetId) != sendTimes.end())
+        {
+            double delay = abs(receiveTime - sendTimes[packetId]);
+            delays.push_back(delay);
+        }
         return;
     }
     else
@@ -774,33 +789,51 @@ App::SelectBestNeighbour(Vector destPos, Vector myPosi, Ipv4Address destAddr)
                                            entry.first);
         }
     }
+    std::vector<Ipv4Address> bestNeighbours;
     if (sameZoneNeighbours.size() > 0)
     {
-        SendHello(0.1);
         NS_LOG_INFO("Same Zone Neighbour Selected from " << sameZoneNeighbours.size());
-        return {sameZoneNeighbours.begin()->second};
+        auto it = sameZoneNeighbours.begin();
+        for(uint8_t i=0;i<Min(forwadingFactor,sameZoneNeighbours.size());i++)
+        {
+            bestNeighbours.push_back(it->second);
+            it++;
+        }
     }
-    if (adjancentZoneNeighboursl.size() > 0 || adjancentZoneNeighboursr.size() > 0)
+    else if (adjancentZoneNeighboursl.size() > 0 || adjancentZoneNeighboursr.size() > 0)
     {
-        SendHello(0.1);
         NS_LOG_INFO("Adjancent Zone Neighbour Selected from "
                     << adjancentZoneNeighboursl.size() + adjancentZoneNeighboursr.size());
-        std::vector<Ipv4Address> adjancentZoneNeighbours;
-        if (adjancentZoneNeighboursl.size() > 0)
-            adjancentZoneNeighbours.push_back(adjancentZoneNeighboursl.begin()->second);
-        if (adjancentZoneNeighboursr.size() > 0)
-            adjancentZoneNeighbours.push_back(adjancentZoneNeighboursr.begin()->second);
-        return adjancentZoneNeighbours;
+        auto it = adjancentZoneNeighboursl.begin();
+        for(uint8_t i=0;i<Min(forwadingFactor,adjancentZoneNeighboursl.size());i++)
+        {
+            bestNeighbours.push_back(it->second);
+            it++;
+        }
+        it = adjancentZoneNeighboursr.begin();
+        for(uint8_t i=0;i<Min(forwadingFactor,adjancentZoneNeighboursr.size());i++)
+        {
+            bestNeighbours.push_back(it->second);
+            it++;
+        }
     }
-    if (backZoneNeighbours.size() > 0)
+    else if (backZoneNeighbours.size() > 0)
     {
-        SendHello(0.1);
         NS_LOG_INFO("Back Zone Neighbour Selected from " << backZoneNeighbours.size());
-        return {backZoneNeighbours.begin()->second};
+        auto it = backZoneNeighbours.begin();
+        for(uint8_t i=0;i<Min(forwadingFactor,backZoneNeighbours.size());i++)
+        {
+            bestNeighbours.push_back(it->second);
+            it++;
+        }
     }
-    noNegibhours++;
+    else
+    {
+        NS_LOG_INFO("No Neighbour Selected");
+        noNegibhours++;
+    }
     SendHello(0.1);
-    return {};
+    return bestNeighbours;
 }
 
 double
@@ -850,18 +883,22 @@ uint32_t App::totalSent = 0;
 uint32_t App::totalReceived = 0;
 uint32_t App::noNegibhours = 0;
 
-
 void
-RunSimulation(uint8_t numDrones, double& pdr)
+RunSimulation(uint8_t numDrones, double& pdr, double& averageDelay)
 {
+    if(numDrones > 50) {
+        forwadingFactor = 2;
+    }
     std::cout<<"Simulation Running with " << std::to_string(numDrones) <<" drones.\n";
     App::totalSent = 0;
     App::totalReceived = 0;
     App::noNegibhours = 0;
-    double totalTime = 500.0;
+    double totalTime = 200.0;
     TOTAL_DRONES = numDrones;
     NodeContainer nodes;
     nodes.Create(numDrones);
+
+    delays = std::vector<double>(100+1,0);
 
     // Set up Wi-Fi.
     WifiHelper wifi;
@@ -914,7 +951,7 @@ RunSimulation(uint8_t numDrones, double& pdr)
     mobility.Install(nodes);
 
     // Create and install the application on each node.
-    Ptr<App> appNode[100];
+    std::vector<Ptr<App>> appNode(numDrones); // Dynamically resize based on numDrones
     for (uint16_t i = 0; i < TOTAL_DRONES; i++)
     {
         appNode[i] = CreateObject<App>(i + 1);
@@ -932,12 +969,11 @@ RunSimulation(uint8_t numDrones, double& pdr)
     destAddr = interfaces.GetAddress(TOTAL_DRONES - 1);
 
     for (uint32_t i = 0; i < 100; ++i)
+    
     {
-        Simulator::Schedule(Seconds(1.0 + i * 0.5),
-                            &App::SendMessage,
-                            appNode[0],
-                            destPos,
-                            destAddr);
+        double sendTime = Simulator::Now().GetSeconds() + 1.0 + i * 0.5;
+        sendTimes[packetIdCounter + i] = sendTime;
+        Simulator::Schedule(Seconds(1.0 + i * 0.5), &App::SendMessage, appNode[0], destPos, destAddr);
     }
 
     Simulator::Stop(Seconds(totalTime));
@@ -954,6 +990,12 @@ RunSimulation(uint8_t numDrones, double& pdr)
         pdr = 0;
     }
 
+    double totalDelay = 0.0;
+    for (double delay : delays)
+    {
+        totalDelay += delay;
+    }
+    averageDelay = delays.empty() ? 0.0 : totalDelay / delays.size();
     Simulator::Destroy();
 }
 
@@ -962,14 +1004,16 @@ main(int argc, char* argv[])
 {
     // LogComponentEnable("ZAF", LOG_LEVEL_INFO);
     // LogComponentEnable("UdpSocketImpl", LOG_LEVEL_INFO);
-    double pdr;
+    double pdr, averageDelay;
     std::vector<double> pdrs;
     std::vector<int> droneCounts;
-    for (int i = 50; i <= 250; i = i + 50)
+    std::vector<double> averageDelays;
+    for (int i = 55; i <= 100; i = i + 5)
     {
-        RunSimulation(i, pdr);
+        RunSimulation(i, pdr,averageDelay);
         pdrs.push_back(pdr);
         droneCounts.push_back(i);
+        averageDelays.push_back(averageDelay);
     }
 
     // Plot the results using Gnuplot
@@ -995,26 +1039,43 @@ main(int argc, char* argv[])
     plotFile << "set title 'PDR vs. Number of Drones'\n";
     plotFile << "set xlabel 'Number of Drones'\n";
     plotFile << "set ylabel 'PDR (%)'\n";
-    plotFile << "set xrange [0:50]\n";  // Set the x-axis range if needed
+    plotFile << "set xrange [55:100]\n";  // Set the x-axis range if needed
     plotFile << "set yrange [0:100]\n";   // Set the y-axis range from 0 to 100
     plotFile << "set ytics 10\n";         // Set the y-axis interval to 10
+    plotFile << "set xtics 5\n";         // Set the y-axis interval to 10
     plotFile << "plot '-' using 1:2 title 'PDR' with linespoints\n";
+
+    // Write the plotting commands to a .plt file
+    std::ofstream plotFile2("delay-vs-drones.plt");
+    plotFile2 << "set terminal png\n";
+    plotFile2 << "set output 'delay-vs-drones.png'\n";
+    plotFile2 << "set title 'Average Delay vs. Number of Drones'\n";
+    plotFile2 << "set xlabel 'Number of Drones'\n";
+    plotFile2 << "set ylabel 'Average Delay (s)'\n";
+    plotFile2 << "set xrange [55:100]\n";  // Set the x-axis range if needed
+    plotFile2 << "set yrange [0:1]\n";     // Set the y-axis range from 0 to max delay
+             // Set the y-axis interval to 10
+    plotFile << "set xtics 5\n"; 
+    plotFile2 << "plot '-' using 1:2 title 'Average Delay' with linespoints\n";
 
     for (size_t i = 0; i < droneCounts.size(); ++i)
     {
         plotFile << droneCounts[i] << " " << pdrs[i] << "\n";
+        plotFile2 << droneCounts[i] << " " << averageDelays[i] << "\n";
     }
 
     plotFile << "e\n";
     plotFile.close();
+    plotFile2 << "e\n";
+    plotFile2.close();
 
     // Call Gnuplot to generate the graph
     system("gnuplot pdr-vs-drones.plt");
+    system("gnuplot delay-vs-drones.plt");
 
     std::cout << "Simulation completed. Plot saved as pdr-vs-drones.png" << std::endl;
 
     return 0;
 }
 
-// Aodv , gpsr, tora, olsr
-// PDR, DELAY , THROUGHPUT
+/*You are a member of research paper drafting team which divide work among themselves to write the paper you are provided with this code and write about simulation and result section of the paper based on the code whole team has written according to their idea make it informative but not giving up to much of data of the simulation which can be fatal to the group yet enough for the credibility of the paper make it in paragraph form not in bullet points and write Simulation and reuslts part of paper*/
