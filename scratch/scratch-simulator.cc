@@ -17,7 +17,7 @@
 std::map<uint32_t, double> sendTimes;
 std::vector<double> delays;
 
-uint16_t TOTAL_DRONES = 2;
+uint16_t TOTAL_DRONES = 1;
 
 using namespace ns3;
 
@@ -1008,7 +1008,7 @@ main(int argc, char* argv[])
     std::vector<double> pdrs;
     std::vector<int> droneCounts;
     std::vector<double> averageDelays;
-    for (int i = 55; i <= 100; i = i + 5)
+    for (int i = 5; i <= 50; i = i + 5)
     {
         RunSimulation(i, pdr,averageDelay);
         pdrs.push_back(pdr);
